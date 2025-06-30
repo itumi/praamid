@@ -303,18 +303,19 @@ document.addEventListener('DOMContentLoaded', () => {
                     // Authorization header removed
                 },
                 body: JSON.stringify({
-                    // Pass original_event_data as the backend expects it for event details
                     original_event_data: original_event_data,
                     direction: direction,
-                    departureDate: departureDate, // YYYY-MM-DD
+                    departureDate: departureDate,
                     pricelistCode: pricelistCode,
                     numCars: numCars,
-                    numAdults: numAdults
-                    // vehicleRegNr can be added here if collected from UI
+                    numAdults: numAdults,
+                    userEmail: userEmail,     // Ensure these are explicitly included
+                    userPhone: userPhone,     // Ensure these are explicitly included
+                    vehicleRegNr: vehicleRegNr  // Ensure this is explicitly included
                 })
             });
 
-            const responseData = await response.json(); // Attempt to parse JSON regardless of response.ok
+            const responseData = await response.json();
 
             if (!response.ok) {
                 // Use error from JSON response if available, otherwise default
