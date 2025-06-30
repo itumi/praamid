@@ -1,14 +1,20 @@
 document.addEventListener('DOMContentLoaded', () => {
     const getScheduleBtn = document.getElementById('getScheduleBtn');
     const resultsContainer = document.getElementById('resultsContainer');
-    const authTokenInput = document.getElementById('authToken');
+    // Token input removed
+    // const authTokenInput = document.getElementById('authToken');
     const directionSelect = document.getElementById('direction');
     const departureDateInput = document.getElementById('departureDate');
     const numCarsInput = document.getElementById('numCars');
+    const vehicleRegNrGroup = document.getElementById('vehicleRegNrGroup'); // Group to show/hide
+    const vehicleRegNrInput = document.getElementById('vehicleRegNr');
     const numAdultsInput = document.getElementById('numAdults');
+    const emailInput = document.getElementById('email');
+    const phoneInput = document.getElementById('phone');
     const errorMessagesDiv = document.getElementById('errorMessages');
-    const tokenHelpLink = document.getElementById('tokenHelpLink');
-    const tokenHelpContent = document.getElementById('tokenHelpContent');
+    // Token help removed
+    // const tokenHelpLink = document.getElementById('tokenHelpLink');
+    // const tokenHelpContent = document.getElementById('tokenHelpContent');
 
     // Set default date to today
     const today = new Date();
@@ -17,36 +23,52 @@ document.addEventListener('DOMContentLoaded', () => {
     const dd = String(today.getDate()).padStart(2, '0');
     departureDateInput.value = `${yyyy}-${mm}-${dd}`;
 
-    if (tokenHelpLink) {
-        tokenHelpLink.addEventListener('click', (e) => {
-            e.preventDefault();
-            const isVisible = tokenHelpContent.style.display === 'block';
-            tokenHelpContent.style.display = isVisible ? 'none' : 'block';
-            tokenHelpLink.textContent = isVisible ? '(Show instructions)' : '(Hide instructions)';
+    // Show/hide vehicle registration number field based on numCars
+    if (numCarsInput && vehicleRegNrGroup) {
+        numCarsInput.addEventListener('input', () => {
+            const numCars = parseInt(numCarsInput.value);
+            if (numCars > 0) {
+                vehicleRegNrGroup.style.display = 'block';
+            } else {
+                vehicleRegNrGroup.style.display = 'none';
+                vehicleRegNrInput.value = ''; // Clear if cars set to 0
+            }
         });
+        // Initial check in case default numCars is > 0
+        if (parseInt(numCarsInput.value) > 0) {
+            vehicleRegNrGroup.style.display = 'block';
+        }
     }
+
+    // Token help removed
+    // if (tokenHelpLink) {
+    //     tokenHelpLink.addEventListener('click', (e) => {
+    //         e.preventDefault();
+    //         const isVisible = tokenHelpContent.style.display === 'block';
+    //         tokenHelpContent.style.display = isVisible ? 'none' : 'block';
+    //         tokenHelpLink.textContent = isVisible ? '(Show instructions)' : '(Hide instructions)';
+    //     });
+    // }
 
     if (getScheduleBtn) {
         getScheduleBtn.addEventListener('click', fetchSchedule);
     }
 
     async function fetchSchedule() {
-        const token = authTokenInput.value;
+        // Token removed
+        // const token = authTokenInput.value;
         const direction = directionSelect.value;
         const date = departureDateInput.value;
-        // Values from new inputs - will be used later for addToCart
-        // const numCars = parseInt(numCarsInput.value) || 0;
-        // const numAdults = parseInt(numAdultsInput.value) || 0;
-
 
         clearMessages();
         resultsContainer.innerHTML = '<p>Loading schedule...</p>';
 
-        if (!token) {
-            showError('Authorization Token is required.');
-            resultsContainer.innerHTML = '<p>Please enter the Authorization Token.</p>';
-            return;
-        }
+        // Token check removed
+        // if (!token) {
+        //     showError('Authorization Token is required.');
+        //     resultsContainer.innerHTML = '<p>Please enter the Authorization Token.</p>';
+        //     return;
+        // }
         if (!date) {
             showError('Departure Date is required.');
             resultsContainer.innerHTML = '<p>Please select a Departure Date.</p>';
@@ -60,7 +82,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const response = await fetch(backendUrl, {
                 method: 'GET',
                 headers: {
-                    'Authorization': token.startsWith('Bearer ') ? token : `Bearer ${token}`,
+                    // Authorization header removed
                     'Content-Type': 'application/json'
                 }
             });
@@ -113,6 +135,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             const shipCode = (trip.ship && trip.ship.code) ? trip.ship.code : "N/A";
+            // Pricelist code is now directly available from the enhanced /api/get_schedule response
             const pricelistCode = (trip.pricelist && trip.pricelist.code) ? trip.pricelist.code : null;
 
 
@@ -125,14 +148,26 @@ document.addEventListener('DOMContentLoaded', () => {
             `;
 
             if (isAvailable) {
-                const attemptCartButton = document.createElement('button'); // Changed from <a> to <button>
-                attemptCartButton.classList.add('book-button'); // Re-use styling for now
+                const attemptCartButton = document.createElement('button');
+                attemptCartButton.classList.add('book-button');
                 attemptCartButton.textContent = 'Attempt to Add to Cart';
 
                 attemptCartButton.addEventListener('click', () => {
                     const numCars = parseInt(numCarsInput.value);
                     const numAdults = parseInt(numAdultsInput.value);
-                    if (isNaN(numCars) || numCars < 0 || isNaN(numAdults) || numAdults < 0) {
+                    const userEmail = emailInput.value.trim();
+                    const userPhone = phoneInput.value.trim();
+                    const vehicleRegNr = vehicleRegNrInput.value.trim();
+
+                    if (!userEmail || !userPhone) {
+                        showError("Email and Phone Number are required.");
+                        return;
+                    }
+                    if (numCars > 0 && !vehicleRegNr) {
+                        showError("Vehicle Registration Number is required when booking for a car.");
+                        return;
+                    }
+                     if (isNaN(numCars) || numCars < 0 || isNaN(numAdults) || numAdults < 0) {
                         showError("Please enter valid numbers for cars and adults.");
                         return;
                     }
@@ -140,16 +175,18 @@ document.addEventListener('DOMContentLoaded', () => {
                         showError("Please specify at least one car or one adult.");
                         return;
                     }
-                    // Placeholder for actual API call
+
                     handleAttemptAddToCart({
-                        tripUid: trip.uid, // Assuming backend response includes trip.uid
-                        dtstart_utc_iso: trip.dtstart_utc_iso,
+                        original_event_data: trip.original_event_data, // Pass the whole original event item
                         direction: direction,
-                        departureDate: departureDate, // This is the YYYY-MM-DD date
+                        departureDate: departureDate,
                         pricelistCode: pricelistCode,
                         numCars: numCars,
                         numAdults: numAdults,
-                        token: authTokenInput.value
+                        userEmail: userEmail,
+                        userPhone: userPhone,
+                        vehicleRegNr: vehicleRegNr
+                        // Token is no longer sent
                     });
                 });
                 tripDiv.appendChild(attemptCartButton);
