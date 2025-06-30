@@ -17,12 +17,10 @@ PRAAMID_BOOKINGS_URL = "https://www.praamid.ee/online/bookings"
 def format_time_from_iso(iso_string):
     if not iso_string: return "N/A"
     try:
-        # Normalize timezone offset with colon to be without colon for strptime if needed by older Python
-        # Example: 2025-07-01T20:17:00.000+00:00 -> 2025-07-01T20:17:00.000+0000
         normalized_iso_string = iso_string
         if '+' in iso_string and iso_string[-3] == ':':
             normalized_iso_string = iso_string[:-3] + iso_string[-2:]
-        elif '-' in iso_string and iso_string[-3] == ':': # For negative offsets
+        elif '-' in iso_string and iso_string[-3] == ':':
             normalized_iso_string = iso_string[:-3] + iso_string[-2:]
 
         if 'Z' in normalized_iso_string:
@@ -165,17 +163,18 @@ def add_to_cart():
     if num_cars > 0 and not data.get('vehicleRegNr'):
         return jsonify({"error": "Missing field in payload: vehicleRegNr (required if numCars > 0)"}), 400
 
-    original_event_data = data['original_event_data']
+    # Correctly access the actual Praamid event item:
+    # data['original_event_data'] from the frontend IS the actual Praamid event item.
+    event_item_from_praamid = data['original_event_data']
+    print(f"DEBUG: Extracted event_item_from_praamid: {event_item_from_praamid}")
+
     direction_code = data['direction']
     departure_date = data['departureDate']
 
     pricelist_code = data.get('pricelistCode')
     if not pricelist_code:
-        if original_event_data.get("pricelist") and original_event_data["pricelist"].get("code"):
-            pricelist_code = original_event_data["pricelist"].get("code")
-        elif original_event_data.get("original_event_data", {}).get("pricelist") and \
-             original_event_data["original_event_data"]["pricelist"].get("code"):
-            pricelist_code = original_event_data["original_event_data"]["pricelist"].get("code")
+        if event_item_from_praamid.get("pricelist") and event_item_from_praamid["pricelist"].get("code"):
+            pricelist_code = event_item_from_praamid["pricelist"].get("code")
     if not pricelist_code:
         return jsonify({"error": "Missing pricelistCode, cannot determine item prices."}), 400
 
@@ -194,18 +193,19 @@ def add_to_cart():
         if not boarding_passes and num_cars == 0 and num_adults == 0 :
              return jsonify({"error": "No items (cars or adults) specified for booking."}), 400
 
-        event_source_data = original_event_data.get("original_event_data", {})
         event_for_payload = {
-            "dtstart": event_source_data.get("dtstart"),
-            "dtend": event_source_data.get("dtend"),
-            "uid": event_source_data.get("uid"),
+            "dtstart": event_item_from_praamid.get("dtstart"),
+            "dtend": event_item_from_praamid.get("dtend"),
+            "uid": event_item_from_praamid.get("uid"),
             "pricelist": {"code": pricelist_code},
-            "transportationType": event_source_data.get("transportationType"),
-            "ship": event_source_data.get("ship")
+            "transportationType": event_item_from_praamid.get("transportationType"),
+            "ship": event_item_from_praamid.get("ship")
         }
+        print(f"DEBUG: Constructed event_for_payload: {event_for_payload}")
+
         direction_obj_for_payload = {"code": direction_code}
-        if event_source_data.get("direction"):
-            direction_obj_for_payload = event_source_data.get("direction")
+        if event_item_from_praamid.get("direction"):
+            direction_obj_for_payload = event_item_from_praamid.get("direction")
 
         booking_payload = {
             "tickets": [{
@@ -273,12 +273,12 @@ def check_slot_availability():
         return jsonify({"error": "Missing parameters. Required: direction, date, event_uid"}), 400
 
     try:
-        datetime.strptime(departure_date_str, '%Y-%m-%d') # Validate date format
+        datetime.strptime(departure_date_str, '%Y-%m-%d')
     except ValueError:
         return jsonify({"error": "Invalid date format. Use YYYY-MM-DD"}), 400
 
     target_url = f"{PRAAMID_API_BASE_URL}?direction={direction}&departure-date={departure_date_str}&time-shift=300"
-    headers = {'Accept': 'application/json'} # No auth header
+    headers = {'Accept': 'application/json'}
     response_obj = None
 
     try:
@@ -293,7 +293,7 @@ def check_slot_availability():
             print(f"UIDs found in Praamid response for this check: {found_event_uids}")
 
             for item in praamid_data['items']:
-                if str(item.get("uid")) == str(event_uid_to_check): # Explicitly cast to string for comparison
+                if str(item.get("uid")) == str(event_uid_to_check):
                     available_cars = item.get("capacities", {}).get("sv", 0)
                     print(f"Match found for {event_uid_to_check}. Cars: {available_cars}")
                     return jsonify({
@@ -314,9 +314,8 @@ def check_slot_availability():
         return jsonify({"error": f"HTTP error checking slot availability: {http_err}", "details": details}), status_code
     except requests.exceptions.RequestException as e:
         return jsonify({"error": f"Request exception while checking slot: {str(e)}"}), 503
-    except ValueError as e: # JSONDecodeError
+    except ValueError as e:
         return jsonify({"error": f"Failed to decode JSON for slot check: {str(e)}"}), 500
-
 
 @app.route('/')
 def home():
