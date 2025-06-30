@@ -324,11 +324,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
             if (responseData.checkoutUrl) {
                 console.log("Attempting to open checkout URL:", responseData.checkoutUrl); // DEBUG
-                alert("Check console for checkout URL. Will attempt to open: " + responseData.checkoutUrl); // DEBUG
+                // alert("Check console for checkout URL. Will attempt to open: " + responseData.checkoutUrl); // DEBUG - Removed
                 resultsContainer.innerHTML += `<p class="success-message">Successfully created booking. <a href="${responseData.checkoutUrl}" target="_blank">Proceed to Checkout on Praamid.ee (Booking UID: ${responseData.bookingUid})</a></p>`;
                 const newTab = window.open(responseData.checkoutUrl, '_blank');
                 if (newTab) {
-                    showError('Successfully initiated booking. Opened Praamid.ee checkout page...');
+                    showError('Successfully initiated booking. Attempting to open Praamid.ee checkout page... You may be redirected.');
                 } else {
                     showError('Could not open new tab. Please check your popup blocker. Checkout URL: ' + responseData.checkoutUrl);
                     resultsContainer.innerHTML += `<p class="error-message">Could not open new tab. Popup blocker? <a href="${responseData.checkoutUrl}" target="_blank">Manual Checkout Link (Booking UID: ${responseData.bookingUid})</a></p>`;
