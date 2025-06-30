@@ -22,54 +22,48 @@
             </div>
 
             <div class="control-group">
-                <label for="direction">Direction:</label>
-                <select id="direction" name="direction">
-                    <option value="HR">Heltermaa - Rohuküla</option>
-                    <option value="RH">Rohuküla - Heltermaa</option>
-                    <option value="KV">Kuivastu - Virtsu</option>
-                    <option value="VK">Virtsu - Kuivastu</option>
-                </select>
-            </div>
-
-            <div class="control-group">
                 <label for="departureDate">Departure Date:</label>
                 <input type="date" id="departureDate" name="departureDate">
             </div>
 
-            <div class="control-group">
-                <label for="numCars">Number of Cars:</label>
-                <input type="number" id="numCars" name="numCars" value="1" min="0">
-            </div>
-
-            <div class="control-group" id="vehicleRegNrGroup" style="display: none;"> <!-- Initially hidden -->
-                <label for="vehicleRegNr">Vehicle Registration Number:</label>
-                <input type="text" id="vehicleRegNr" name="vehicleRegNr" placeholder="e.g., 123ABC">
+            <div class="control-group" id="vehicleRegNrGroup">
+                <label for="vehicleRegNr">Vehicle Registration Number (for 1 car):</label>
+                <input type="text" id="vehicleRegNr" name="vehicleRegNr" placeholder="e.g., 123ABC" required>
             </div>
 
             <div class="control-group">
                 <label for="numAdults">Number of Adults:</label>
-                <input type="number" id="numAdults" name="numAdults" value="1" min="0">
+                <input type="number" id="numAdults" name="numAdults" value="1" min="1"> <!-- Min 1 adult -->
             </div>
 
             <div class="control-group">
-                <label for="email">Email:</label>
+                <label for="email">Your Email (for booking):</label>
                 <input type="email" id="email" name="email" placeholder="your.email@example.com" required>
             </div>
 
             <div class="control-group">
-                <label for="phone">Phone Number:</label>
+                <label for="phone">Your Phone Number (for booking):</label>
                 <input type="tel" id="phone" name="phone" placeholder="+37212345678" required>
             </div>
 
-            <button id="getScheduleBtn">Get Schedule</button>
+            <button id="getScheduleBtn">Load Available Times</button>
         </div>
 
         <div id="scheduleResults">
-            <h2>Schedule</h2>
+            <h2>Available Times (Select to Monitor)</h2>
             <div id="resultsContainer">
-                <p>Please select direction, date, ticket quantities, enter contact details, and click "Get Schedule".</p>
+                <p>Please select direction and date, then click "Load Available Times".</p>
+            </div>
+            <div class="monitoring-controls" id="monitoringControlsArea" style="margin-top: 15px; display: none;">
+                <button id="startMonitoringBtn">Start Monitoring Selected Times</button>
+                <button id="stopMonitoringBtn" style="display: none; background-color: #dc3545; margin-top: 10px;">Stop Monitoring</button>
             </div>
         </div>
+
+        <div id="monitoringStatus" style="margin-top: 15px; padding: 10px; border: 1px solid #eee; background-color: #f9f9f9;">
+            <p>Monitoring Status: Idle</p>
+        </div>
+
          <div id="errorMessages" class="error-message" style="display:none;"></div>
     </div>
 

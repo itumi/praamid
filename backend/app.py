@@ -81,15 +81,14 @@ def get_schedule():
     except ValueError as e:
         return jsonify({"error": f"Failed to decode JSON schedule response: {str(e)}"}), 500
 
-# auth_header parameter removed
-def get_ticket_item_details_from_praamid(pricelist_code, departure_date, num_cars, num_adults, vehicle_reg_nr_from_user=None):
+# Now accepts a requests.Session object
+def get_ticket_item_details_from_praamid(session, pricelist_code, departure_date, num_cars, num_adults, vehicle_reg_nr_from_user=None):
     item_details_for_payload = []
-    # common_headers no longer include Authorization
     common_headers = {'Accept': 'application/json'}
 
     try:
-        # auth_header removed from this call
-        mappings_response = requests.get(PRAAMID_ITEM_MAPPINGS_URL, headers=common_headers, timeout=7)
+        # Use the session object for the GET request
+        mappings_response = session.get(PRAAMID_ITEM_MAPPINGS_URL, headers=common_headers, timeout=7)
         mappings_response.raise_for_status()
         mappings = mappings_response.json().get("items", [])
     except Exception as e:
@@ -97,8 +96,8 @@ def get_ticket_item_details_from_praamid(pricelist_code, departure_date, num_car
 
     try:
         prices_url = PRAAMID_PRICES_URL_TEMPLATE.format(pricelist_code=pricelist_code, date=departure_date)
-        # auth_header removed from this call
-        prices_response = requests.get(prices_url, headers=common_headers, timeout=7)
+        # Use the session object for the GET request
+        prices_response = session.get(prices_url, headers=common_headers, timeout=7)
         prices_response.raise_for_status()
         prices_data = prices_response.json().get("items", [])
         price_map = {p["item"]["code"]: p["amount"] for p in prices_data if p.get("item") and p["item"].get("code")}
@@ -189,10 +188,13 @@ def add_to_cart():
     user_phone = data['userPhone']
     vehicle_reg_nr_for_payload = data.get("vehicleRegNr", "") if num_cars > 0 else ""
 
-    # auth_header removed from this call
-    boarding_passes, error_msg = get_ticket_item_details_from_praamid(
-        pricelist_code, departure_date, num_cars, num_adults, vehicle_reg_nr_for_payload
-    )
+
+    # Create a session object for this booking attempt
+    with requests.Session() as session:
+        # Pass the session to the helper function
+        boarding_passes, error_msg = get_ticket_item_details_from_praamid(
+            session, pricelist_code, departure_date, num_cars, num_adults, vehicle_reg_nr_for_payload
+        )
 
     if error_msg: return jsonify({"error": error_msg}), 500
     if not boarding_passes and (num_cars > 0 or num_adults > 0):
@@ -247,7 +249,8 @@ def add_to_cart():
 
     try:
         print(f"Attempting to POST to {PRAAMID_BOOKINGS_URL} (guest) with payload: {booking_payload}")
-        booking_response_obj = requests.post(PRAAMID_BOOKINGS_URL, headers=post_headers, json=booking_payload, timeout=20)
+        # Use the same session object for the POST request
+        booking_response_obj = session.post(PRAAMID_BOOKINGS_URL, headers=post_headers, json=booking_payload, timeout=20)
         booking_response_obj.raise_for_status()
         booking_confirmation = booking_response_obj.json()
         booking_uid = booking_confirmation.get("response")
@@ -281,6 +284,53 @@ def add_to_cart():
     except ValueError as e:
         print(f"JSON decode error for Praamid response (guest booking): {str(e)}")
         return jsonify({"error": f"Failed to decode JSON response from Praamid.ee during booking creation: {str(e)}"}), 500
+
+
+@app.route('/api/check_slot_availability', methods=['GET'])
+def check_slot_availability():
+    direction = request.args.get('direction')
+    departure_date_str = request.args.get('date')
+    event_uid_to_check = request.args.get('event_uid')
+
+    if not all([direction, departure_date_str, event_uid_to_check]):
+        return jsonify({"error": "Missing parameters. Required: direction, date, event_uid"}), 400
+
+    try:
+        datetime.strptime(departure_date_str, '%Y-%m-%d') # Validate date format
+    except ValueError:
+        return jsonify({"error": "Invalid date format. Use YYYY-MM-DD"}), 400
+
+    target_url = f"{PRAAMID_API_BASE_URL}?direction={direction}&departure-date={departure_date_str}&time-shift=300"
+    headers = {'Accept': 'application/json'} # No auth header
+    response_obj = None
+
+    try:
+        response_obj = requests.get(target_url, headers=headers, timeout=10)
+        response_obj.raise_for_status()
+        praamid_data = response_obj.json()
+
+        if praamid_data and 'items' in praamid_data:
+            for item in praamid_data['items']:
+                if item.get("uid") == event_uid_to_check:
+                    available_cars = item.get("capacities", {}).get("sv", 0)
+                    return jsonify({
+                        "event_uid": event_uid_to_check,
+                        "available_cars": available_cars,
+                        "is_available": available_cars > 0
+                    }), 200
+            return jsonify({"error": "Event UID not found for the given date and direction"}), 404
+        else:
+            return jsonify({"error": "No schedule items found for the given date and direction"}), 404
+
+    except requests.exceptions.HTTPError as http_err:
+        status_code = getattr(response_obj, 'status_code', 500)
+        details = response_obj.text if response_obj is not None else "No response object"
+        return jsonify({"error": f"HTTP error checking slot availability: {http_err}", "details": details}), status_code
+    except requests.exceptions.RequestException as e:
+        return jsonify({"error": f"Request exception while checking slot: {str(e)}"}), 503
+    except ValueError as e: # JSONDecodeError
+        return jsonify({"error": f"Failed to decode JSON for slot check: {str(e)}"}), 500
+
 
 @app.route('/')
 def home():
