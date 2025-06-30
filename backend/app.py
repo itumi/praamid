@@ -17,29 +17,28 @@ PRAAMID_BOOKINGS_URL = "https://www.praamid.ee/online/bookings"
 def format_time_from_iso(iso_string):
     if not iso_string: return "N/A"
     try:
-        # Attempt to handle various ISO 8601 formats
-        # Python's fromisoformat is more capable in 3.7+ but has quirks with colons in timezone for older versions.
-        # Try to make it compatible with common outputs like "+00:00"
-        if '+' in iso_string and iso_string[-3] == ':': # Handles +HH:MM
-            iso_string_normalized = iso_string[:-3] + iso_string[-2:] # Converts +HH:MM to +HHMM
-            if '.' in iso_string_normalized:
-                 dt_object = datetime.strptime(iso_string_normalized, "%Y-%m-%dT%H:%M:%S.%f%z")
-            else:
-                 dt_object = datetime.strptime(iso_string_normalized, "%Y-%m-%dT%H:%M:%S%z")
-        elif 'Z' in iso_string: # Handles Z (Zulu time / UTC)
-            if '.' in iso_string:
-                dt_object = datetime.strptime(iso_string, "%Y-%m-%dT%H:%M:%S.%f%z")
-            else:
-                dt_object = datetime.strptime(iso_string, "%Y-%m-%dT%H:%M:%S%z")
-        else: # If no explicit Z or standard offset, try fromisoformat and assume UTC if naive
-            dt_object = datetime.fromisoformat(iso_string)
+        # Normalize timezone offset with colon to be without colon for strptime if needed by older Python
+        # Example: 2025-07-01T20:17:00.000+00:00 -> 2025-07-01T20:17:00.000+0000
+        normalized_iso_string = iso_string
+        if '+' in iso_string and iso_string[-3] == ':':
+            normalized_iso_string = iso_string[:-3] + iso_string[-2:]
+        elif '-' in iso_string and iso_string[-3] == ':': # For negative offsets
+            normalized_iso_string = iso_string[:-3] + iso_string[-2:]
+
+        if 'Z' in normalized_iso_string:
+            fmt = "%Y-%m-%dT%H:%M:%S.%f%z" if '.' in normalized_iso_string else "%Y-%m-%dT%H:%M:%S%z"
+            dt_object = datetime.strptime(normalized_iso_string.replace('Z', '+0000'), fmt)
+        elif '+' in normalized_iso_string or '-' in normalized_iso_string[19:]:
+            fmt = "%Y-%m-%dT%H:%M:%S.%f%z" if '.' in normalized_iso_string else "%Y-%m-%dT%H:%M:%S%z"
+            dt_object = datetime.strptime(normalized_iso_string, fmt)
+        else:
+            dt_object = datetime.fromisoformat(normalized_iso_string)
             if dt_object.tzinfo is None:
                  dt_object = dt_object.replace(tzinfo=timezone.utc)
 
         return dt_object.astimezone(timezone.utc).strftime("%H:%M")
     except ValueError as e:
-        print(f"Could not parse date with custom logic: {iso_string}, Error: {e}")
-        # Fallback to simple string slicing if all parsing fails
+        print(f"Could not parse date string '{iso_string}' (normalized to '{normalized_iso_string}'): {e}")
         parts = iso_string.split('T')
         if len(parts) > 1 and len(parts[1]) >= 5:
             return parts[1][:5]
@@ -163,7 +162,7 @@ def add_to_cart():
         if field not in data: return jsonify({"error": f"Missing field in payload: {field}"}), 400
 
     num_cars = int(data['numCars'])
-    if num_cars > 0 and not data.get('vehicleRegNr'): # Check vehicleRegNr if cars > 0
+    if num_cars > 0 and not data.get('vehicleRegNr'):
         return jsonify({"error": "Missing field in payload: vehicleRegNr (required if numCars > 0)"}), 400
 
     original_event_data = data['original_event_data']
@@ -171,7 +170,7 @@ def add_to_cart():
     departure_date = data['departureDate']
 
     pricelist_code = data.get('pricelistCode')
-    if not pricelist_code: # Try to get from nested original_event_data
+    if not pricelist_code:
         if original_event_data.get("pricelist") and original_event_data["pricelist"].get("code"):
             pricelist_code = original_event_data["pricelist"].get("code")
         elif original_event_data.get("original_event_data", {}).get("pricelist") and \
@@ -264,6 +263,52 @@ def add_to_cart():
             print(f"JSON decode error for Praamid response (guest booking): {str(e)}")
             return jsonify({"error": f"Failed to decode JSON response from Praamid.ee during booking creation: {str(e)}"}), 500
 
+@app.route('/api/check_slot_availability', methods=['GET'])
+def check_slot_availability():
+    direction = request.args.get('direction')
+    departure_date_str = request.args.get('date')
+    event_uid_to_check = request.args.get('event_uid')
+
+    if not all([direction, departure_date_str, event_uid_to_check]):
+        return jsonify({"error": "Missing parameters. Required: direction, date, event_uid"}), 400
+
+    try:
+        datetime.strptime(departure_date_str, '%Y-%m-%d') # Validate date format
+    except ValueError:
+        return jsonify({"error": "Invalid date format. Use YYYY-MM-DD"}), 400
+
+    target_url = f"{PRAAMID_API_BASE_URL}?direction={direction}&departure-date={departure_date_str}&time-shift=300"
+    headers = {'Accept': 'application/json'} # No auth header
+    response_obj = None
+
+    try:
+        response_obj = requests.get(target_url, headers=headers, timeout=10)
+        response_obj.raise_for_status()
+        praamid_data = response_obj.json()
+
+        if praamid_data and 'items' in praamid_data:
+            for item in praamid_data['items']:
+                if item.get("uid") == event_uid_to_check:
+                    available_cars = item.get("capacities", {}).get("sv", 0)
+                    return jsonify({
+                        "event_uid": event_uid_to_check,
+                        "available_cars": available_cars,
+                        "is_available": available_cars > 0
+                    }), 200
+            return jsonify({"error": "Event UID not found for the given date and direction"}), 404
+        else:
+            return jsonify({"error": "No schedule items found for the given date and direction"}), 404
+
+    except requests.exceptions.HTTPError as http_err:
+        status_code = getattr(response_obj, 'status_code', 500)
+        details = response_obj.text if response_obj is not None else "No response object"
+        return jsonify({"error": f"HTTP error checking slot availability: {http_err}", "details": details}), status_code
+    except requests.exceptions.RequestException as e:
+        return jsonify({"error": f"Request exception while checking slot: {str(e)}"}), 503
+    except ValueError as e: # JSONDecodeError
+        return jsonify({"error": f"Failed to decode JSON for slot check: {str(e)}"}), 500
+
+
 @app.route('/')
 def home():
     return "Ferry Ticket Checker Backend is running."
@@ -271,3 +316,5 @@ def home():
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 8080))
     app.run(debug=True, host='0.0.0.0', port=port)
+
+[end of backend/app.py]
