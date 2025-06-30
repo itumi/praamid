@@ -286,17 +286,26 @@ def check_slot_availability():
         response_obj.raise_for_status()
         praamid_data = response_obj.json()
 
+        print(f"Checking slot: UID_to_check={event_uid_to_check}, Date={departure_date_str}, Direction={direction}")
+
         if praamid_data and 'items' in praamid_data:
+            found_event_uids = [item.get("uid") for item in praamid_data['items']]
+            print(f"UIDs found in Praamid response for this check: {found_event_uids}")
+
             for item in praamid_data['items']:
-                if item.get("uid") == event_uid_to_check:
+                if str(item.get("uid")) == str(event_uid_to_check): # Explicitly cast to string for comparison
                     available_cars = item.get("capacities", {}).get("sv", 0)
+                    print(f"Match found for {event_uid_to_check}. Cars: {available_cars}")
                     return jsonify({
                         "event_uid": event_uid_to_check,
                         "available_cars": available_cars,
                         "is_available": available_cars > 0
                     }), 200
+
+            print(f"Event UID {event_uid_to_check} NOT found in the list.")
             return jsonify({"error": "Event UID not found for the given date and direction"}), 404
         else:
+            print(f"No schedule items found for date {departure_date_str}, direction {direction} in check_slot_availability.")
             return jsonify({"error": "No schedule items found for the given date and direction"}), 404
 
     except requests.exceptions.HTTPError as http_err:
@@ -316,5 +325,3 @@ def home():
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 8080))
     app.run(debug=True, host='0.0.0.0', port=port)
-
-[end of backend/app.py]
