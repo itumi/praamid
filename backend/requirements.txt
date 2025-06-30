@@ -1,0 +1,4 @@
+Flask>=2.0
+requests>=2.20
+python-dotenv>=0.15
+Flask-CORS>=3.0 # Added for CORS management
