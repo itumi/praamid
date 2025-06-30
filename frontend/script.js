@@ -299,8 +299,8 @@ document.addEventListener('DOMContentLoaded', () => {
             const response = await fetch(addToCartUrl, {
                 method: 'POST',
                 headers: {
-                    'Authorization': token.startsWith('Bearer ') ? token : `Bearer ${token}`,
                     'Content-Type': 'application/json'
+                    // Authorization header removed
                 },
                 body: JSON.stringify({
                     // Pass original_event_data as the backend expects it for event details
