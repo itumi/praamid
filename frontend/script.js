@@ -1,20 +1,26 @@
 document.addEventListener('DOMContentLoaded', () => {
-    const getScheduleBtn = document.getElementById('getScheduleBtn');
+    const getScheduleBtn = document.getElementById('getScheduleBtn'); // Now "Load Available Times"
     const resultsContainer = document.getElementById('resultsContainer');
-    // Token input removed
-    // const authTokenInput = document.getElementById('authToken');
     const directionSelect = document.getElementById('direction');
     const departureDateInput = document.getElementById('departureDate');
-    const numCarsInput = document.getElementById('numCars');
-    const vehicleRegNrGroup = document.getElementById('vehicleRegNrGroup'); // Group to show/hide
+    // numCarsInput removed as we assume 1 car if vehicleRegNr is filled
+    // const numCarsInput = document.getElementById('numCars');
+    const vehicleRegNrGroup = document.getElementById('vehicleRegNrGroup');
     const vehicleRegNrInput = document.getElementById('vehicleRegNr');
     const numAdultsInput = document.getElementById('numAdults');
     const emailInput = document.getElementById('email');
     const phoneInput = document.getElementById('phone');
     const errorMessagesDiv = document.getElementById('errorMessages');
-    // Token help removed
-    // const tokenHelpLink = document.getElementById('tokenHelpLink');
-    // const tokenHelpContent = document.getElementById('tokenHelpContent');
+
+    const monitoringControlsArea = document.getElementById('monitoringControlsArea');
+    const startMonitoringBtn = document.getElementById('startMonitoringBtn');
+    const stopMonitoringBtn = document.getElementById('stopMonitoringBtn');
+    const monitoringStatusDiv = document.getElementById('monitoringStatus');
+
+    // Global state for monitoring
+    let monitoredSlots = [];
+    let monitoringIntervalId = null;
+    let currentUserDetails = {};
 
     // Set default date to today
     const today = new Date();
@@ -23,52 +29,22 @@ document.addEventListener('DOMContentLoaded', () => {
     const dd = String(today.getDate()).padStart(2, '0');
     departureDateInput.value = `${yyyy}-${mm}-${dd}`;
 
-    // Show/hide vehicle registration number field based on numCars
-    if (numCarsInput && vehicleRegNrGroup) {
-        numCarsInput.addEventListener('input', () => {
-            const numCars = parseInt(numCarsInput.value);
-            if (numCars > 0) {
-                vehicleRegNrGroup.style.display = 'block';
-            } else {
-                vehicleRegNrGroup.style.display = 'none';
-                vehicleRegNrInput.value = ''; // Clear if cars set to 0
-            }
-        });
-        // Initial check in case default numCars is > 0
-        if (parseInt(numCarsInput.value) > 0) {
-            vehicleRegNrGroup.style.display = 'block';
-        }
-    }
-
-    // Token help removed
-    // if (tokenHelpLink) {
-    //     tokenHelpLink.addEventListener('click', (e) => {
-    //         e.preventDefault();
-    //         const isVisible = tokenHelpContent.style.display === 'block';
-    //         tokenHelpContent.style.display = isVisible ? 'none' : 'block';
-    //         tokenHelpLink.textContent = isVisible ? '(Show instructions)' : '(Hide instructions)';
-    //     });
-    // }
+    // Vehicle Reg Nr is always visible as per new plan for 1 car booking.
+    // No need for special show/hide logic based on numCarsInput anymore.
+    // if (numCarsInput && vehicleRegNrGroup) { ... } // This logic is removed.
 
     if (getScheduleBtn) {
         getScheduleBtn.addEventListener('click', fetchSchedule);
     }
 
     async function fetchSchedule() {
-        // Token removed
-        // const token = authTokenInput.value;
         const direction = directionSelect.value;
         const date = departureDateInput.value;
 
         clearMessages();
-        resultsContainer.innerHTML = '<p>Loading schedule...</p>';
+        resultsContainer.innerHTML = '<p>Loading available times...</p>';
+        monitoringControlsArea.style.display = 'none'; // Hide monitoring controls initially
 
-        // Token check removed
-        // if (!token) {
-        //     showError('Authorization Token is required.');
-        //     resultsContainer.innerHTML = '<p>Please enter the Authorization Token.</p>';
-        //     return;
-        // }
         if (!date) {
             showError('Departure Date is required.');
             resultsContainer.innerHTML = '<p>Please select a Departure Date.</p>';
@@ -82,13 +58,12 @@ document.addEventListener('DOMContentLoaded', () => {
             const response = await fetch(backendUrl, {
                 method: 'GET',
                 headers: {
-                    // Authorization header removed
                     'Content-Type': 'application/json'
                 }
             });
 
             if (!response.ok) {
-                let errorMsg = `Error fetching schedule: ${response.status} ${response.statusText}`;
+                let errorMsg = `Error loading times: ${response.status} ${response.statusText}`;
                 try {
                     const errorData = await response.json();
                     errorMsg += ` - ${errorData.error || 'Unknown server error'}`;
@@ -99,108 +74,223 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             const data = await response.json();
-            displaySchedule(data, direction, date); // Pass date for addToCart
+            displaySchedule(data, direction, date);
 
         } catch (error) {
-            console.error('Failed to fetch schedule:', error);
-            resultsContainer.innerHTML = `<p>Failed to load schedule. ${error.message}</p>`;
-            showError(`Failed to load schedule. ${error.message}. Ensure backend is running.`);
+            console.error('Failed to load times:', error);
+            resultsContainer.innerHTML = `<p>Failed to load available times. ${error.message}</p>`;
+            showError(`Failed to load available times. ${error.message}. Ensure backend is running.`);
         }
     }
 
     function displaySchedule(scheduleData, direction, departureDate) {
-        resultsContainer.innerHTML = '';
+        resultsContainer.innerHTML = ''; // Clear previous results or "Loading..."
 
         if (!scheduleData || scheduleData.length === 0) {
             resultsContainer.innerHTML = '<p>No trips found for the selected date and direction.</p>';
+            monitoringControlsArea.style.display = 'none';
             return;
         }
 
+        const ul = document.createElement('ul');
+        ul.classList.add('trip-list');
+
         scheduleData.forEach(trip => {
-            const tripDiv = document.createElement('div');
-            tripDiv.classList.add('trip');
+            const li = document.createElement('li');
+            li.classList.add('trip-item');
+
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.id = `trip-${trip.event_uid}`;
+            checkbox.value = trip.event_uid;
+            // Store necessary data directly on the checkbox element for easy retrieval
+            checkbox.dataset.eventData = JSON.stringify(trip.original_event_data);
+            checkbox.dataset.pricelistCode = (trip.pricelist && trip.pricelist.code) ? trip.pricelist.code : '';
+            checkbox.dataset.dtstartUtcIso = trip.dtstart_utc_iso;
+
+
+            const label = document.createElement('label');
+            label.htmlFor = checkbox.id;
 
             const displayStartTime = trip.startTimeLocal || formatTime(trip.dtstart_utc_iso);
             const displayEndTime = trip.endTimeLocal || formatTime(trip.dtend_utc_iso);
-
-            let carAvailability = trip.capacities && typeof trip.capacities.sv !== 'undefined' ? trip.capacities.sv : "N/A";
-            let availabilityText = `Cars: ${carAvailability}`;
-
-            let isAvailable = false;
-            if (typeof carAvailability === 'number' && carAvailability > 0) {
-                tripDiv.classList.add('available');
-                isAvailable = true;
-            } else {
-                tripDiv.classList.add('unavailable');
-            }
-
+            const carAvailability = (trip.capacities && typeof trip.capacities.sv !== 'undefined') ? trip.capacities.sv : "N/A";
             const shipCode = (trip.ship && trip.ship.code) ? trip.ship.code : "N/A";
-            // Pricelist code is now directly available from the enhanced /api/get_schedule response
-            const pricelistCode = (trip.pricelist && trip.pricelist.code) ? trip.pricelist.code : null;
 
+            label.innerHTML = ` ${displayStartTime} - ${displayEndTime} (UTC) | Ship: ${shipCode} | Cars: <span class="cars-count">${carAvailability}</span>`;
 
-            tripDiv.innerHTML = `
-                <div class="trip-info">
-                    <span class="time">${displayStartTime} - ${displayEndTime} (UTC)</span>
-                    <span class="ship">Ship: ${shipCode} (Pricelist: ${pricelistCode || 'N/A'})</span>
-                    <span class="availability">${availabilityText}</span>
-                </div>
-            `;
-
-            if (isAvailable) {
-                const attemptCartButton = document.createElement('button');
-                attemptCartButton.classList.add('book-button');
-                attemptCartButton.textContent = 'Attempt to Add to Cart';
-
-                attemptCartButton.addEventListener('click', () => {
-                    const numCars = parseInt(numCarsInput.value);
-                    const numAdults = parseInt(numAdultsInput.value);
-                    const userEmail = emailInput.value.trim();
-                    const userPhone = phoneInput.value.trim();
-                    const vehicleRegNr = vehicleRegNrInput.value.trim();
-
-                    if (!userEmail || !userPhone) {
-                        showError("Email and Phone Number are required.");
-                        return;
-                    }
-                    if (numCars > 0 && !vehicleRegNr) {
-                        showError("Vehicle Registration Number is required when booking for a car.");
-                        return;
-                    }
-                     if (isNaN(numCars) || numCars < 0 || isNaN(numAdults) || numAdults < 0) {
-                        showError("Please enter valid numbers for cars and adults.");
-                        return;
-                    }
-                    if (numCars === 0 && numAdults === 0) {
-                        showError("Please specify at least one car or one adult.");
-                        return;
-                    }
-
-                    handleAttemptAddToCart({
-                        original_event_data: trip.original_event_data, // Pass the whole original event item
-                        direction: direction,
-                        departureDate: departureDate,
-                        pricelistCode: pricelistCode,
-                        numCars: numCars,
-                        numAdults: numAdults,
-                        userEmail: userEmail,
-                        userPhone: userPhone,
-                        vehicleRegNr: vehicleRegNr
-                        // Token is no longer sent
-                    });
-                });
-                tripDiv.appendChild(attemptCartButton);
+            if (typeof carAvailability === 'number' && carAvailability > 0) {
+                li.classList.add('available');
+            } else {
+                li.classList.add('unavailable');
+                checkbox.disabled = true; // Disable checkbox if no cars available initially
+                label.innerHTML += " (Unavailable for monitoring)";
             }
-            resultsContainer.appendChild(tripDiv);
+
+            li.appendChild(checkbox);
+            li.appendChild(label);
+            ul.appendChild(li);
         });
+        resultsContainer.appendChild(ul);
+        monitoringControlsArea.style.display = 'block'; // Show monitoring buttons
+        stopMonitoringBtn.style.display = 'none'; // Ensure stop is hidden initially
+        startMonitoringBtn.style.display = 'inline-block';
     }
 
-    async function handleAttemptAddToCart(data) {
+    // Add event listeners for new buttons
+    if (startMonitoringBtn) {
+        startMonitoringBtn.addEventListener('click', startMonitoring);
+    }
+    if (stopMonitoringBtn) {
+        stopMonitoringBtn.addEventListener('click', stopMonitoring);
+    }
+
+    function updateMonitoringStatus(message) {
+        if (monitoringStatusDiv) {
+            monitoringStatusDiv.innerHTML = `<p>${message}</p>`;
+        }
+        console.log("Monitoring Status:", message);
+    }
+
+    function startMonitoring() {
         clearMessages();
-        showError('Attempting to add to cart...');
+        const selectedCheckboxes = document.querySelectorAll('.trip-item input[type="checkbox"]:checked');
+
+        if (selectedCheckboxes.length === 0) {
+            showError("Please select at least one time slot to monitor.");
+            return;
+        }
+
+        const userEmail = emailInput.value.trim();
+        const userPhone = phoneInput.value.trim();
+        const vehicleRegNr = vehicleRegNrInput.value.trim(); // Assuming 1 car if this is filled
+        const numAdults = parseInt(numAdultsInput.value);
+
+        if (!userEmail || !userPhone) {
+            showError("Email and Phone Number are required to start monitoring.");
+            return;
+        }
+        if (!vehicleRegNr) { // Assuming vehicle is always booked with this app.
+            showError("Vehicle Registration Number is required to start monitoring.");
+            return;
+        }
+         if (isNaN(numAdults) || numAdults < 1) { // Ensure at least 1 adult
+            showError("Please enter a valid number of adults (at least 1).");
+            return;
+        }
+
+        currentUserDetails = { userEmail, userPhone, vehicleRegNr, numAdults, numCars: 1 }; // Store for use in polling
+
+        monitoredSlots = Array.from(selectedCheckboxes).map(cb => {
+            return {
+                eventUid: cb.value,
+                dtstartUtcIso: cb.dataset.dtstartUtcIso,
+                originalEventData: JSON.parse(cb.dataset.eventData),
+                pricelistCode: cb.dataset.pricelistCode,
+                direction: directionSelect.value, // Get current direction
+                departureDate: departureDateInput.value // Get current date
+            };
+        });
+
+        if (monitoringIntervalId) {
+            clearInterval(monitoringIntervalId); // Clear existing interval if any
+        }
+
+        // Poll every 30 seconds (adjust as needed)
+        const POLLING_INTERVAL = 30000;
+        monitoringIntervalId = setInterval(pollAllSelectedSlots, POLLING_INTERVAL);
+
+        startMonitoringBtn.style.display = 'none';
+        stopMonitoringBtn.style.display = 'inline-block';
+        updateMonitoringStatus(`Monitoring ${monitoredSlots.length} time slot(s). Will check every ${POLLING_INTERVAL / 1000} seconds.`);
+        pollAllSelectedSlots(); // Initial immediate check
+    }
+
+    function stopMonitoring() {
+        if (monitoringIntervalId) {
+            clearInterval(monitoringIntervalId);
+            monitoringIntervalId = null;
+        }
+        monitoredSlots = [];
+        startMonitoringBtn.style.display = 'inline-block';
+        stopMonitoringBtn.style.display = 'none';
+        updateMonitoringStatus("Monitoring stopped by user.");
+    }
+
+    async function pollAllSelectedSlots() {
+        if (monitoredSlots.length === 0) {
+            stopMonitoring(); // Should not happen if interval is running, but good check
+            return;
+        }
+        updateMonitoringStatus(`Checking ${monitoredSlots.length} slot(s)... Last check: ${new Date().toLocaleTimeString()}`);
+
+        for (const slot of monitoredSlots) {
+            // Call backend to check individual slot availability
+            // This requires a new backend endpoint: /api/check_slot_availability
+            const backendBaseUrl = 'http://localhost:8080';
+            const checkUrl = `${backendBaseUrl}/api/check_slot_availability?direction=${slot.direction}&date=${slot.departureDate}&event_uid=${slot.eventUid}`;
+
+            try {
+                const response = await fetch(checkUrl); // No auth header needed
+                if (!response.ok) {
+                    console.error(`Error checking slot ${slot.eventUid}: ${response.status}`);
+                    // Optionally update UI for this specific slot's error
+                    continue; // Move to next slot
+                }
+                const availabilityData = await response.json();
+
+                const carsAvailableDisplay = document.querySelector(`#trip-${slot.eventUid} + label .cars-count`);
+                if(carsAvailableDisplay) carsAvailableDisplay.textContent = availabilityData.available_cars;
+
+
+                if (availabilityData.is_available && availabilityData.available_cars > 0) {
+                    updateMonitoringStatus(`Slot ${formatTime(slot.dtstartUtcIso)} has ${availabilityData.available_cars} car(s)! Attempting to book...`);
+                    // Pass all necessary data to handleAttemptAddToCart
+                    await handleAttemptAddToCart({
+                        original_event_data: slot.originalEventData, // This is the full event object
+                        direction: slot.direction,
+                        departureDate: slot.departureDate,
+                        pricelistCode: slot.pricelistCode,
+                        numCars: currentUserDetails.numCars, // Always 1 car as per new logic
+                        numAdults: currentUserDetails.numAdults,
+                        userEmail: currentUserDetails.userEmail,
+                        userPhone: currentUserDetails.userPhone,
+                        vehicleRegNr: currentUserDetails.vehicleRegNr
+                    });
+                    // If booking attempt is made (successful or not), stop monitoring to prevent re-booking.
+                    // More sophisticated logic could retry on certain failures.
+                    stopMonitoring();
+                    break; // Stop polling other slots once one is found and booking is attempted
+                }
+            } catch (error) {
+                console.error(`Error polling slot ${slot.eventUid}:`, error);
+                updateMonitoringStatus(`Error polling slot ${formatTime(slot.dtstartUtcIso)}. Will retry.`);
+            }
+        }
+    }
+
+
+    async function handleAttemptAddToCart(data) {
+        // Ensure essential user details are present before proceeding
+        if (!data.userEmail || !data.userPhone) {
+            showError("Error: Email or Phone missing for booking attempt.");
+            updateMonitoringStatus("Error: Email/Phone missing for booking attempt. Monitoring stopped for this slot.");
+            return;
+        }
+        // vehicleRegNr is now part of currentUserDetails and passed in `data`
+        if (data.numCars > 0 && !data.vehicleRegNr) {
+            showError("Error: Vehicle Registration Number missing for car booking attempt.");
+            updateMonitoringStatus("Error: Vehicle Reg Nr missing. Monitoring stopped for this slot.");
+            return;
+        }
+
+        // Use dtstart from the original_event_data for more accuracy if available
+        const startTimeForDisplay = data.original_event_data.dtstart || data.dtstart_utc_iso;
+        showError(`Attempting to book slot: ${formatTime(startTimeForDisplay)}...`);
+        updateMonitoringStatus(`Attempting to book slot: ${formatTime(startTimeForDisplay)}...`);
         console.log("Attempting to add to cart with data:", data);
 
-        const { original_event_data, direction, departureDate, pricelistCode, numCars, numAdults, token } = data;
+        const { original_event_data, direction, departureDate, pricelistCode, numCars, numAdults, userEmail, userPhone, vehicleRegNr } = data;
 
         const backendBaseUrl = 'http://localhost:8080';
         const addToCartUrl = `${backendBaseUrl}/api/add_to_cart`;
